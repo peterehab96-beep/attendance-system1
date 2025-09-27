@@ -1,0 +1,65 @@
+# GitLab CI/CD Pipeline for Next.js Attendance System
+image: node:18
+
+# Define stages
+stages:
+  - build
+  - deploy
+
+# Cache node_modules for faster builds
+cache:
+  paths:
+    - node_modules/
+    - .next/cache/
+
+# Variables
+variables:
+  NODE_ENV: "production"
+
+# Build stage
+build:
+  stage: build
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run build
+  artifacts:
+    paths:
+      - .next/
+      - public/
+    expire_in: 1 hour
+  only:
+    - main
+    - master
+
+# Deploy to GitLab Pages (Optional)
+pages:
+  stage: deploy
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run build
+    - mkdir public_pages
+    - cp -r .next/static public_pages/
+    - cp -r public/* public_pages/ 2>/dev/null || true
+  artifacts:
+    paths:
+      - public_pages
+  only:
+    - main
+    - master
+  when: manual
+
+# Deploy to Vercel (Recommended)
+deploy_vercel:
+  stage: deploy
+  image: node:18
+  before_script:
+    - npm install -g vercel
+  script:
+    - vercel --token $VERCEL_TOKEN --prod --yes
+  environment:
+    name: production
+    url: https://your-app.vercel.app
+  only:
+    - main
+    - master
+  when: manual
