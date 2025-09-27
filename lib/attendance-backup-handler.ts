@@ -1,7 +1,6 @@
-// Enhanced Attendance Handler with Google Backup
-// Handles attendance recording with automatic fallback to Google Sheets/Forms
+// Enhanced Attendance Handler (Simplified for production build)
+// Handles attendance recording with Supabase database
 
-import { googleBackupService } from './google-backup-service'
 import { createClient } from '@/lib/supabase/client'
 
 interface AttendanceData {
@@ -22,10 +21,10 @@ class AttendanceBackupHandler {
 
   async recordAttendance(data: AttendanceData): Promise<{
     success: boolean
-    method: 'database' | 'google_backup' | 'failed'
+    method: 'database' | 'local_fallback' | 'failed'
     error?: string
   }> {
-    // First, try to record to primary database (Supabase)
+    // Try to record to primary database (Supabase)
     try {
       const result = await this.recordToDatabase(data)
       if (result.success) {
@@ -33,39 +32,20 @@ class AttendanceBackupHandler {
         return { success: true, method: 'database' }
       }
     } catch (error) {
-      console.warn('⚠️ Primary database failed, attempting backup...', error)
+      console.warn('⚠️ Primary database failed, using local fallback...', error)
     }
 
-    // If primary database fails, use Google Backup
+    // If database fails, store locally (temporary solution)
     try {
-      const backupResult = await this.recordToGoogleBackup(data)
-      if (backupResult) {
-        console.log('✅ Attendance recorded to Google Backup')
-        
-        // Log the database failure for later recovery
-        await googleBackupService.logError(
-          'database_failure',
-          'Primary database unavailable, used Google backup',
-          data
-        )
-        
-        return { success: true, method: 'google_backup' }
-      }
+      this.storeLocalFallback(data)
+      return { success: true, method: 'local_fallback' }
     } catch (error) {
-      console.error('❌ Google backup also failed:', error)
-    }
-
-    // If both methods fail
-    await googleBackupService.logError(
-      'total_failure',
-      'Both primary database and Google backup failed',
-      data
-    )
-
-    return { 
-      success: false, 
-      method: 'failed',
-      error: 'All attendance recording methods failed'
+      console.error('❌ All methods failed:', error)
+      return { 
+        success: false, 
+        method: 'failed',
+        error: 'All attendance recording methods failed'
+      }
     }
   }
 
@@ -97,18 +77,19 @@ class AttendanceBackupHandler {
     }
   }
 
-  private async recordToGoogleBackup(data: AttendanceData): Promise<boolean> {
-    return await googleBackupService.recordAttendanceBackup({
-      studentName: data.studentName,
-      studentEmail: data.studentEmail,
-      subject: data.subject,
-      sessionType: data.sessionType,
-      timestamp: data.timestamp,
-      qrCode: data.qrCode,
-      status: data.status,
-      notes: data.notes,
-      errorType: 'database_fallback'
-    })
+  private storeLocalFallback(data: AttendanceData) {
+    // Store in localStorage as fallback
+    const key = `attendance_fallback_${Date.now()}`
+    const fallbackData = {
+      ...data,
+      timestamp: data.timestamp.toISOString(),
+      stored_at: new Date().toISOString()
+    }
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(fallbackData))
+      console.log('📦 Attendance stored locally as fallback')
+    }
   }
 
   async syncBackupToDatabase(): Promise<{
@@ -117,57 +98,43 @@ class AttendanceBackupHandler {
     failed: number
     errors: string[]
   }> {
-    if (!googleBackupService.isReady()) {
-      return { total: 0, successful: 0, failed: 0, errors: ['Google Backup not configured'] }
+    // Sync from localStorage fallback
+    if (typeof window === 'undefined') {
+      return { total: 0, successful: 0, failed: 0, errors: ['Not available on server side'] }
     }
 
-    try {
-      // Get all backup records
-      const backupRecords = await googleBackupService.getBackupRecords()
-      const errors: string[] = []
-      let successful = 0
-      let failed = 0
+    const fallbackKeys = Object.keys(localStorage).filter(key => key.startsWith('attendance_fallback_'))
+    const errors: string[] = []
+    let successful = 0
+    let failed = 0
 
-      for (const record of backupRecords) {
-        try {
-          // Skip header row
-          if (record[0] === 'Date') continue
-
-          // Parse the backup record
-          const attendanceData = {
-            studentName: record[2],
-            studentEmail: record[3],
-            subject: record[4],
-            sessionType: record[5],
-            status: record[6] as 'present' | 'late' | 'absent',
-            timestamp: new Date(record[0] + ' ' + record[1]),
-            notes: record[8]
-          }
-
-          // Try to sync to database
-          // Note: This would need actual student_id and session_id mapping
-          // For now, we'll create a recovery record
-          
+    for (const key of fallbackKeys) {
+      try {
+        const data = JSON.parse(localStorage.getItem(key) || '{}')
+        // Try to sync to database
+        const result = await this.recordToDatabase({
+          ...data,
+          timestamp: new Date(data.timestamp)
+        })
+        
+        if (result.success) {
+          localStorage.removeItem(key)
           successful++
-        } catch (error: any) {
+        } else {
           failed++
-          errors.push(`Failed to sync record: ${error.message}`)
+          errors.push(result.error || 'Unknown error')
         }
+      } catch (error: any) {
+        failed++
+        errors.push(`Failed to sync ${key}: ${error.message}`)
       }
+    }
 
-      return {
-        total: backupRecords.length - 1, // Exclude header
-        successful,
-        failed,
-        errors
-      }
-    } catch (error: any) {
-      return {
-        total: 0,
-        successful: 0,
-        failed: 0,
-        errors: [error.message]
-      }
+    return {
+      total: fallbackKeys.length,
+      successful,
+      failed,
+      errors
     }
   }
 
@@ -177,7 +144,6 @@ class AttendanceBackupHandler {
     lastBackupSync: Date | null
     pendingRecords: number
   }> {
-    const googleBackupReady = googleBackupService.isReady()
     let databaseReady = false
     
     try {
@@ -189,21 +155,16 @@ class AttendanceBackupHandler {
       databaseReady = false
     }
 
-    // Get pending backup records count
+    // Get pending local fallback records count
     let pendingRecords = 0
-    if (googleBackupReady) {
-      try {
-        const records = await googleBackupService.getBackupRecords()
-        pendingRecords = records.length - 1 // Exclude header
-      } catch {
-        pendingRecords = 0
-      }
+    if (typeof window !== 'undefined') {
+      pendingRecords = Object.keys(localStorage).filter(key => key.startsWith('attendance_fallback_')).length
     }
 
     return {
-      googleBackupReady,
+      googleBackupReady: false, // Disabled for now
       databaseReady,
-      lastBackupSync: null, // This would be stored in settings
+      lastBackupSync: null,
       pendingRecords
     }
   }
