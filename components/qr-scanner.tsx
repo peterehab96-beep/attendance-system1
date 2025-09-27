@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Camera, QrCode, CheckCircle, AlertCircle, RefreshCw, Scan, Upload, Info } from "lucide-react"
+import { Camera, QrCode, CheckCircle, AlertCircle, RefreshCw, Scan, Upload, Info, AlertTriangle } from "lucide-react"
 import { CameraManager } from "@/lib/camera-utils"
 import { useAttendanceStore } from "@/lib/attendance-store"
 import { attendanceBackupHandler } from '@/lib/attendance-backup-handler'
@@ -52,166 +52,154 @@ export function QRScanner({ student, onSuccessfulScan }: QRScannerProps) {
   const startCamera = async () => {
     try {
       console.log("[QR Scanner] Starting camera...")
-
-      // Check if mediaDevices is available
+      setScanResult(null)
+      
+      // Basic checks
       if (!navigator?.mediaDevices?.getUserMedia) {
-        throw new Error("Camera API not supported on this device or browser")
+        throw new Error("Camera not supported on this device")
       }
 
-      // Stop any existing streams first
-      if (videoRef.current?.srcObject) {
-        stopCamera()
+      if (!videoRef.current) {
+        throw new Error("Video element not ready")
       }
 
-      // Request camera permission with multiple fallback options
-      let stream: MediaStream | null = null
-      const constraints: MediaStreamConstraints[] = [
-        {
-          // Try with environment camera (back camera on mobile) - highest quality
-          video: {
-            facingMode: { exact: "environment" },
-            width: { ideal: 1280, min: 640 },
-            height: { ideal: 720, min: 480 },
-            frameRate: { ideal: 30, min: 15 }
-          },
+      // Stop any existing camera first
+      stopCamera()
+
+      // Simple progressive constraints - start with basic and work up
+      const constraints = [
+        // Most basic - just get any camera
+        { video: true },
+        // Try with basic quality
+        { 
+          video: { 
+            width: { ideal: 640 }, 
+            height: { ideal: 480 } 
+          } 
         },
-        {
-          // Fallback to environment camera with relaxed constraints
-          video: {
+        // Try with back camera if available
+        { 
+          video: { 
             facingMode: "environment",
-            width: { ideal: 1024, min: 480 },
-            height: { ideal: 576, min: 360 },
-          },
-        },
-        {
-          // Fallback to user camera (front camera)
-          video: {
-            facingMode: "user",
-            width: { ideal: 1024, min: 480 },
-            height: { ideal: 576, min: 360 },
-          },
-        },
-        {
-          // Final fallback - any available camera with basic constraints
-          video: {
-            width: { ideal: 640, min: 320 },
-            height: { ideal: 480, min: 240 },
-          },
-        },
-        {
-          // Last resort - minimal constraints
-          video: true,
+            width: { ideal: 640 }, 
+            height: { ideal: 480 } 
+          } 
         }
       ]
 
-      let lastError: Error | null = null
-      
+      let stream = null
+      let constraintUsed = -1
+
+      // Try each constraint until one works
       for (let i = 0; i < constraints.length; i++) {
         try {
-          console.log(`[QR Scanner] Trying camera constraint ${i + 1}/${constraints.length}...`)
+          console.log(`[QR Scanner] Trying constraint ${i + 1}:`, constraints[i])
           stream = await navigator.mediaDevices.getUserMedia(constraints[i])
-          
-          if (stream) {
-            console.log(`[QR Scanner] Camera stream obtained with constraint ${i + 1}`)
-            break
+          constraintUsed = i
+          console.log(`[QR Scanner] Success with constraint ${i + 1}`)
+          break
+        } catch (err: any) {
+          console.log(`[QR Scanner] Constraint ${i + 1} failed:`, err.name, err.message)
+          if (i === constraints.length - 1) {
+            throw err // Last constraint failed, throw the error
           }
-        } catch (error: any) {
-          console.log(`[QR Scanner] Constraint ${i + 1} failed:`, error.message)
-          lastError = error
-          continue
         }
       }
 
       if (!stream) {
-        throw lastError || new Error("Failed to access any camera")
+        throw new Error("Could not get camera stream")
       }
 
-      // Verify video element exists
-      if (!videoRef.current) {
+      // Verify we have video tracks
+      const videoTracks = stream.getVideoTracks()
+      if (videoTracks.length === 0) {
         stream.getTracks().forEach(track => track.stop())
-        throw new Error("Video element not available")
+        throw new Error("No video tracks in camera stream")
       }
+
+      console.log(`[QR Scanner] Got video track:`, videoTracks[0].label)
 
       // Set up video element
       const video = videoRef.current
       video.srcObject = stream
-      
-      // Configure video properties
       video.autoplay = true
       video.playsInline = true
       video.muted = true
-      
-      // Wait for video metadata to load with timeout
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error("Video loading timeout - camera may be busy"))
-        }, 15000) // 15 second timeout
-        
-        const onLoadedMetadata = () => {
-          clearTimeout(timeout)
-          video.removeEventListener('loadedmetadata', onLoadedMetadata)
+
+      // Wait for video to be ready
+      return new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error("Camera setup timeout"))
+        }, 10000)
+
+        const onSuccess = () => {
+          clearTimeout(timeoutId)
+          video.removeEventListener('loadedmetadata', onSuccess)
           video.removeEventListener('error', onError)
+          
+          console.log(`[QR Scanner] Video ready: ${video.videoWidth}x${video.videoHeight}`)
+          
+          // Final validation
+          if (video.videoWidth === 0 || video.videoHeight === 0) {
+            reject(new Error("Camera not providing video data"))
+            return
+          }
+
+          setCameraPermission("granted")
+          setIsScanning(true)
+          toast.success('Camera started! Position QR code in frame.')
           resolve()
         }
-        
+
         const onError = (event: Event) => {
-          clearTimeout(timeout)
-          video.removeEventListener('loadedmetadata', onLoadedMetadata)
+          clearTimeout(timeoutId)
+          video.removeEventListener('loadedmetadata', onSuccess)
           video.removeEventListener('error', onError)
-          reject(new Error(`Video error: ${(event as any).error || 'Unknown error'}`)) 
+          reject(new Error(`Video error: ${(event as any).error?.message || 'Unknown'}`))
         }
-        
-        video.addEventListener('loadedmetadata', onLoadedMetadata)
+
+        video.addEventListener('loadedmetadata', onSuccess)
         video.addEventListener('error', onError)
-        
-        // If video is already loaded
-        if (video.readyState >= 1) {
-          onLoadedMetadata()
+
+        // Try to play the video
+        video.play().catch(playErr => {
+          console.log("[QR Scanner] Play failed but continuing:", playErr.message)
+          // Don't reject here - some browsers block autoplay but camera still works
+        })
+
+        // Check if already loaded
+        if (video.readyState >= 2) {
+          onSuccess()
         }
       })
-        
-      // Start video playback
-      try {
-        await video.play()
-      } catch (playError: any) {
-        console.log("[QR Scanner] Auto-play failed, trying manual play...", playError)
-        // On some browsers, auto-play might fail, but we can still use the camera
-      }
-      
-      setCameraPermission("granted")
-      setIsScanning(true)
-      console.log("[QR Scanner] Camera started successfully")
-      
-      // Clear any previous error messages
-      setScanResult(null)
-      
+
     } catch (error: any) {
-      console.error("[QR Scanner] Error accessing camera:", error)
+      console.error("[QR Scanner] Camera error:", error)
       setCameraPermission("denied")
       
-      let errorMessage = "Camera access failed. "
+      let userMessage = "Camera access failed. "
       
-      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        errorMessage += "Please allow camera permissions in your browser settings and refresh the page."
-      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-        errorMessage += "No camera found on this device."
-      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-        errorMessage += "Camera is being used by another application. Please close other camera apps and try again."
+      if (error.name === 'NotAllowedError') {
+        userMessage += "Please allow camera access and try again. Look for a camera icon in your browser's address bar."
+      } else if (error.name === 'NotFoundError') {
+        userMessage += "No camera found. Please connect a camera and try again."
+      } else if (error.name === 'NotReadableError') {
+        userMessage += "Camera is being used by another app. Please close other camera apps and try again."
       } else if (error.name === 'SecurityError') {
-        errorMessage += "Camera access is not allowed over insecure connections. Please use HTTPS."
-      } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
-        errorMessage += "Camera does not support the required features."
-      } else if (error.message.includes('timeout') || error.message.includes('busy')) {
-        errorMessage += "Camera is busy or not responding. Please wait a moment and try again."
+        userMessage += "Camera blocked for security. Please use HTTPS or localhost."
       } else {
-        errorMessage += error.message || "Unknown camera error occurred."
+        userMessage += error.message || "Unknown error. Please try using image upload instead."
       }
       
-      errorMessage += " You can upload a QR code image instead."
+      userMessage += " You can still upload QR code images."
       
       setScanResult({
         success: false,
-        message: errorMessage,
+        message: userMessage
+      })
+      
+      toast.error('Camera failed', {
+        description: userMessage.split('.')[0]
       })
     }
   }
@@ -528,38 +516,47 @@ export function QRScanner({ student, onSuccessfulScan }: QRScannerProps) {
         </Alert>
       )}
 
-      {/* Instructions */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base sm:text-lg">Scanning Instructions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-xs sm:text-sm text-muted-foreground">
-          <div className="flex items-start space-x-2">
-            <div className="w-5 h-5 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-              <span className="text-xs font-medium text-primary">1</span>
-            </div>
-            <p>Select your current subject from the dropdown above</p>
-          </div>
-          <div className="flex items-start space-x-2">
-            <div className="w-5 h-5 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-              <span className="text-xs font-medium text-primary">2</span>
-            </div>
-            <p>Start the camera or prepare to upload a QR code image</p>
-          </div>
-          <div className="flex items-start space-x-2">
-            <div className="w-5 h-5 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-              <span className="text-xs font-medium text-primary">3</span>
-            </div>
-            <p>Position the QR code within the camera frame or select an image file</p>
-          </div>
-          <div className="flex items-start space-x-2">
-            <div className="w-5 h-5 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-              <span className="text-xs font-medium text-primary">4</span>
-            </div>
-            <p>Click "Scan QR Code" and wait for confirmation of successful attendance</p>
-          </div>
-        </CardContent>
-      </Card>
+          {/* Instructions and Troubleshooting */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                <Info className="w-5 h-5" />
+                Camera Troubleshooting
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {cameraPermission === "denied" && (
+                <Alert>
+                  <AlertTriangle className="w-4 h-4" />
+                  <AlertDescription className="space-y-2">
+                    <p className="font-medium">Camera Access Blocked</p>
+                    <div className="text-sm space-y-1">
+                      <p>1. Click the camera icon in your browser's address bar</p>
+                      <p>2. Select "Allow" for camera access</p>
+                      <p>3. Refresh the page and try again</p>
+                      <p>4. Make sure no other apps are using the camera</p>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+              
+              <div className="grid gap-2 text-sm text-muted-foreground">
+                <p><strong>Common Issues:</strong></p>
+                <p>• Camera blocked by browser: Check address bar for camera icon</p>
+                <p>• Camera in use: Close Zoom, Skype, Teams, or other camera apps</p>
+                <p>• No HTTPS: Camera requires secure connection (https://)</p>
+                <p>• Hardware issue: Try a different browser or device</p>
+                <p>• Mobile issues: Try both front and back cameras</p>
+              </div>
+              
+              <Alert>
+                <Info className="w-4 h-4" />
+                <AlertDescription>
+                  <strong>Alternative:</strong> If camera issues persist, you can always upload a photo of the QR code using the "Upload QR Image" option above.
+                </AlertDescription>
+              </Alert>
+            </CardContent>
+          </Card>
 
       {scanResult && !scanResult.success && (
         <div className="flex justify-center">

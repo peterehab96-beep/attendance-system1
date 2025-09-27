@@ -3,6 +3,14 @@ export interface CameraCapabilities {
   hasPermission: boolean
   supportsFacingMode: boolean
   supportedConstraints: MediaTrackSupportedConstraints | null
+  isSecureContext: boolean
+  availableDevices: MediaDeviceInfo[]
+}
+
+export interface CameraError {
+  type: 'permission' | 'not_found' | 'busy' | 'security' | 'constraints' | 'unknown'
+  message: string
+  suggestion: string
 }
 
 export class CameraManager {
@@ -14,7 +22,9 @@ export class CameraManager {
       hasCamera: false,
       hasPermission: false,
       supportsFacingMode: false,
-      supportedConstraints: null
+      supportedConstraints: null,
+      isSecureContext: window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost',
+      availableDevices: []
     }
 
     // Check if mediaDevices API is available
@@ -31,10 +41,20 @@ export class CameraManager {
         result.supportsFacingMode = result.supportedConstraints.facingMode || false
       }
 
+      // Get available devices
+      if (navigator.mediaDevices.enumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        result.availableDevices = devices.filter(device => device.kind === 'videoinput')
+      }
+
       // Check permissions
       if (navigator.permissions) {
-        const permission = await navigator.permissions.query({ name: 'camera' as PermissionName })
-        result.hasPermission = permission.state === 'granted'
+        try {
+          const permission = await navigator.permissions.query({ name: 'camera' as PermissionName })
+          result.hasPermission = permission.state === 'granted'
+        } catch (error) {
+          console.warn('Permission query failed:', error)
+        }
       }
     } catch (error) {
       console.warn('Error checking camera capabilities:', error)
@@ -43,36 +63,133 @@ export class CameraManager {
     return result
   }
 
+  private parseError(error: any): CameraError {
+    let type: CameraError['type'] = 'unknown'
+    let message = 'Camera access failed'
+    let suggestion = 'Please try again or use the image upload option'
+
+    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+      type = 'permission'
+      message = 'Camera permission was denied'
+      suggestion = 'Click the camera icon in your browser address bar and allow camera access, then refresh the page'
+    } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+      type = 'not_found'
+      message = 'No camera found on this device'
+      suggestion = 'Please ensure your camera is connected and working'
+    } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+      type = 'busy'
+      message = 'Camera is being used by another application'
+      suggestion = 'Close other apps that might be using the camera (Zoom, Skype, Teams, etc.) and try again'
+    } else if (error.name === 'SecurityError') {
+      type = 'security'
+      message = 'Camera access blocked for security reasons'
+      suggestion = 'Please use HTTPS or localhost to access the camera'
+    } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+      type = 'constraints'
+      message = 'Camera does not support the required settings'
+      suggestion = 'Try using a different camera or device'
+    } else if (error.message) {
+      message = error.message
+    }
+
+    return { type, message, suggestion }
+  }
+
   async requestCameraAccess(videoElement: HTMLVideoElement): Promise<{
     success: boolean
     stream?: MediaStream
     error?: string
+    errorDetails?: CameraError
   }> {
     try {
-      // Stop any existing stream
-      this.stopCamera()
-
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: 'environment', // Prefer back camera for QR scanning
-          width: { ideal: 1280, min: 640 },
-          height: { ideal: 720, min: 480 },
+      // Check capabilities first
+      const capabilities = await this.checkCameraCapabilities()
+      
+      if (!capabilities.hasCamera) {
+        return {
+          success: false,
+          error: 'Camera API not supported on this device or browser',
+          errorDetails: {
+            type: 'not_found',
+            message: 'Camera API not supported',
+            suggestion: 'Please use a modern browser or device with camera support'
+          }
         }
       }
 
-      // Try with facing mode first
-      let stream: MediaStream
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints)
-      } catch (error) {
-        // Fallback without facing mode constraint
-        console.warn('Environment facing mode not available, trying any camera')
-        stream = await navigator.mediaDevices.getUserMedia({
+      if (!capabilities.isSecureContext) {
+        return {
+          success: false,
+          error: 'Camera access requires a secure connection (HTTPS)',
+          errorDetails: {
+            type: 'security',
+            message: 'Insecure context detected',
+            suggestion: 'Please use HTTPS or localhost to access the camera'
+          }
+        }
+      }
+
+      // Stop any existing stream
+      this.stopCamera()
+
+      // Progressive constraint fallback
+      const constraints: MediaStreamConstraints[] = [
+        {
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 480 },
+          }
+        },
+        {
           video: {
             width: { ideal: 1280, min: 640 },
             height: { ideal: 720, min: 480 },
           }
-        })
+        },
+        {
+          video: {
+            width: { ideal: 640, min: 320 },
+            height: { ideal: 480, min: 240 },
+          }
+        },
+        {
+          video: true
+        }
+      ]
+
+      let stream: MediaStream | null = null
+      let lastError: any = null
+
+      for (let i = 0; i < constraints.length; i++) {
+        try {
+          console.log(`Attempting camera access with constraint set ${i + 1}/${constraints.length}`)
+          stream = await navigator.mediaDevices.getUserMedia(constraints[i])
+          
+          // Verify stream has video tracks
+          if (stream && stream.getVideoTracks().length > 0) {
+            console.log(`Camera access successful with constraint set ${i + 1}`)
+            break
+          } else {
+            if (stream) {
+              stream.getTracks().forEach(track => track.stop())
+            }
+            throw new Error('No video tracks available in stream')
+          }
+        } catch (error) {
+          console.warn(`Constraint set ${i + 1} failed:`, error)
+          lastError = error
+          continue
+        }
+      }
+
+      if (!stream) {
+        const errorDetails = this.parseError(lastError)
+        return {
+          success: false,
+          error: errorDetails.message,
+          errorDetails
+        }
       }
 
       // Set up video element
@@ -80,34 +197,67 @@ export class CameraManager {
       this.stream = stream
       videoElement.srcObject = stream
 
-      // Wait for video to be ready
-      await new Promise((resolve, reject) => {
-        videoElement.onloadedmetadata = () => resolve(true)
-        videoElement.onerror = reject
-        setTimeout(reject, 5000) // 5 second timeout
+      // Configure video element
+      videoElement.autoplay = true
+      videoElement.playsInline = true
+      videoElement.muted = true
+
+      // Wait for video to be ready with proper error handling
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Video loading timeout - camera may be busy or hardware issue'))
+        }, 10000) // 10 second timeout
+        
+        const cleanup = () => {
+          clearTimeout(timeout)
+          videoElement.removeEventListener('loadedmetadata', onLoadedMetadata)
+          videoElement.removeEventListener('error', onError)
+        }
+
+        const onLoadedMetadata = () => {
+          cleanup()
+          // Verify video dimensions
+          if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+            reject(new Error('Video stream is not providing valid dimensions'))
+            return
+          }
+          console.log(`Video loaded: ${videoElement.videoWidth}x${videoElement.videoHeight}`)
+          resolve()
+        }
+
+        const onError = (event: Event) => {
+          cleanup()
+          const errorMsg = (event as any).error?.message || 'Video element error'
+          reject(new Error(`Video error: ${errorMsg}`))
+        }
+
+        videoElement.addEventListener('loadedmetadata', onLoadedMetadata)
+        videoElement.addEventListener('error', onError)
+
+        // Check if already loaded
+        if (videoElement.readyState >= 1) {
+          onLoadedMetadata()
+        }
       })
 
-      await videoElement.play()
+      // Attempt to play video
+      try {
+        await videoElement.play()
+        console.log('Video playback started successfully')
+      } catch (playError: any) {
+        console.warn('Auto-play failed, but camera access is working:', playError)
+        // Auto-play failure is not critical for QR scanning
+      }
 
       return { success: true, stream }
     } catch (error: any) {
-      let errorMessage = 'Camera access failed'
-      
-      if (error.name === 'NotAllowedError') {
-        errorMessage = 'Camera permission denied. Please allow camera access in your browser settings.'
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = 'No camera found on this device.'
-      } else if (error.name === 'NotReadableError') {
-        errorMessage = 'Camera is already in use by another application.'
-      } else if (error.name === 'OverconstrainedError') {
-        errorMessage = 'Camera does not support the required resolution.'
-      } else if (error.name === 'SecurityError') {
-        errorMessage = 'Camera access blocked due to security restrictions.'
-      } else if (error.message) {
-        errorMessage = error.message
+      console.error('Camera access error:', error)
+      const errorDetails = this.parseError(error)
+      return {
+        success: false,
+        error: errorDetails.message,
+        errorDetails
       }
-
-      return { success: false, error: errorMessage }
     }
   }
 
