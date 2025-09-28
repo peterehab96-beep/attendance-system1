@@ -1,9 +1,8 @@
 "use client"
 
 /*
- * Simple Admin Dashboard Page
- * A completely new, simplified QR code system for attendance tracking
- * Works on all devices and browsers with minimal complexity
+ * Simplified Admin Dashboard with Supabase Integration
+ * A simplified version of the original admin dashboard with Supabase integration
  */
 
 import { useState, useEffect } from "react"
@@ -19,40 +18,46 @@ import {
   Clock,
   Users,
   BookOpen,
+  ArrowLeft,
   LogOut,
   User,
-  Database
+  Link
 } from "lucide-react"
 import { toast } from "sonner"
 import QRCode from "qrcode"
 import { useRouter } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
 
-interface SimpleSession {
-  id: string
-  subject: string
-  academicLevel: string
-  qrCodeData: string
-  createdAt: Date
-  expiresAt: Date
-  isActive: boolean
-}
-
-interface AdminUser {
+interface AdminData {
   id: string
   name: string
   email: string
   role: string
 }
 
-export default function SimpleAdminDashboard() {
+interface SimpleSession {
+  id: string
+  subject: string
+  academicLevel: string
+  qrCodeData: string
+  qrCodeUrl: string
+  createdAt: Date
+  expiresAt: Date
+  isActive: boolean
+}
+
+export default function SimplifiedAdminDashboard() {
   const router = useRouter()
-  const [admin, setAdmin] = useState<AdminUser | null>(null)
+  const [admin, setAdmin] = useState<AdminData | null>(null)
   const [selectedSubject, setSelectedSubject] = useState("")
   const [selectedLevel, setSelectedLevel] = useState("")
   const [generatedQR, setGeneratedQR] = useState<string | null>(null)
+  const [generatedQRUrl, setGeneratedQRUrl] = useState<string | null>(null)
   const [currentSession, setCurrentSession] = useState<SimpleSession | null>(null)
   const [attendees, setAttendees] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [sessionsToday, setSessionsToday] = useState(0)
+  const [totalAttendees, setTotalAttendees] = useState(0)
 
   // Simple subject data
   const academicLevels = ["First Year", "Second Year", "Third Year", "Fourth Year"]
@@ -79,94 +84,67 @@ export default function SimpleAdminDashboard() {
     ]
   }
 
-  // Load admin data on component mount
+  // Load admin data and stats
   useEffect(() => {
-    const loadAdminData = () => {
-      try {
-        const localAdmin = localStorage.getItem('current_simple_admin')
-        if (localAdmin) {
-          const adminData = JSON.parse(localAdmin)
-          setAdmin(adminData)
-          console.log("[Simple Admin Dashboard] Loaded admin:", adminData.name)
-        } else {
-          // Redirect to login if no admin data
-          router.push('/simple-auth/admin/login')
-        }
-      } catch (error) {
-        console.error("[Simple Admin Dashboard] Error loading admin:", error)
-        router.push('/simple-auth/admin/login')
-      }
-    }
-
     loadAdminData()
-  }, [router])
+    loadDashboardStats()
+    loadCurrentSession()
+  }, [])
 
-  // Generate a simple QR code for attendance
-  const generateSimpleQR = async () => {
-    if (!selectedSubject || !selectedLevel) {
-      toast.error("Please select both subject and academic level")
-      return
-    }
-
-    setIsLoading(true)
-    
+  const loadAdminData = async () => {
     try {
-      // Create simple session data
-      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      // Load admin data from localStorage
+      const localAdmin = localStorage.getItem('currentAdmin')
       
-      const sessionData = {
-        sessionId: sessionId,
-        subject: selectedSubject,
-        academicLevel: selectedLevel,
-        timestamp: Date.now(),
-        expiresAt: Date.now() + (5 * 60 * 1000) // 5 minutes
+      if (localAdmin) {
+        const adminData = JSON.parse(localAdmin)
+        setAdmin(adminData)
+        console.log("[Simplified Admin] Loaded admin:", adminData.name)
+      } else {
+        // Redirect to login if no admin data
+        router.push('/')
       }
-      
-      // Generate QR code as data URL
-      const qrCodeDataUrl = await QRCode.toDataURL(JSON.stringify(sessionData), {
-        width: 300,
-        margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#ffffff'
-        }
-      })
-      
-      // Create session object
-      const newSession: SimpleSession = {
-        id: sessionId,
-        subject: selectedSubject,
-        academicLevel: selectedLevel,
-        qrCodeData: JSON.stringify(sessionData),
-        createdAt: new Date(),
-        expiresAt: new Date(Date.now() + (5 * 60 * 1000)),
-        isActive: true
-      }
-      
-      // Save to localStorage
-      localStorage.setItem('current_simple_session', JSON.stringify(newSession))
-      localStorage.setItem('simple_attendees', JSON.stringify([]))
-      
-      // Update state
-      setGeneratedQR(qrCodeDataUrl)
-      setCurrentSession(newSession)
-      setAttendees([])
-      
-      toast.success("QR Code Generated!", {
-        description: `Valid for 5 minutes - ${selectedSubject}`,
-        duration: 4000
-      })
-      
     } catch (error) {
-      console.error("Error generating QR:", error)
-      toast.error("Failed to generate QR code")
-    } finally {
-      setIsLoading(false)
+      console.error("[Simplified Admin] Error loading admin:", error)
+      router.push('/')
     }
   }
 
-  // Load existing session if available
-  useEffect(() => {
+  const loadDashboardStats = async () => {
+    try {
+      const supabase = createClient()
+      
+      if (supabase) {
+        // Get today's sessions
+        const today = new Date().toISOString().split('T')[0]
+        
+        const { data: sessions, error: sessionsError } = await supabase
+          .from('attendance_sessions')
+          .select('id')
+          .eq('session_date', today)
+          .eq('is_active', true)
+
+        if (!sessionsError && sessions) {
+          setSessionsToday(sessions.length)
+        }
+
+        // Get total attendees today
+        const { data: attendees, error: attendeesError } = await supabase
+          .from('attendance_records')
+          .select('id')
+          .gte('check_in_time', `${today}T00:00:00Z`)
+          .lt('check_in_time', `${today}T23:59:59Z`)
+
+        if (!attendeesError && attendees) {
+          setTotalAttendees(attendees.length)
+        }
+      }
+    } catch (error) {
+      console.warn("[Simplified Admin] Could not load stats:", error)
+    }
+  }
+
+  const loadCurrentSession = () => {
     const savedSession = localStorage.getItem('current_simple_session')
     const savedAttendees = localStorage.getItem('simple_attendees')
     
@@ -188,6 +166,9 @@ export default function SimpleAdminDashboard() {
             light: '#ffffff'
           }
         }).then(url => setGeneratedQR(url)).catch(console.error)
+        
+        // Set QR URL
+        setGeneratedQRUrl(session.qrCodeUrl)
       } catch (e) {
         console.error("Error loading session:", e)
       }
@@ -200,7 +181,100 @@ export default function SimpleAdminDashboard() {
         console.error("Error loading attendees:", e)
       }
     }
-  }, [])
+  }
+
+  // Generate a simple QR code for attendance
+  const generateSimpleQR = async () => {
+    if (!selectedSubject || !selectedLevel) {
+      toast.error("Please select both subject and academic level")
+      return
+    }
+
+    setIsLoading(true)
+    
+    try {
+      // Create simple session data
+      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      
+      // Create the URL for external scanning
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'
+      const qrCodeUrl = `${baseUrl}/api/scan?sessionId=${sessionId}&token=${sessionId}`
+      
+      const sessionData = {
+        sessionId: sessionId,
+        subject: selectedSubject,
+        academicLevel: selectedLevel,
+        timestamp: Date.now(),
+        expiresAt: Date.now() + (5 * 60 * 1000), // 5 minutes
+        qrCodeUrl: qrCodeUrl
+      }
+      
+      // Generate QR code as data URL
+      const qrCodeDataUrl = await QRCode.toDataURL(qrCodeUrl, {
+        width: 300,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff'
+        }
+      })
+      
+      // Create session object
+      const newSession: SimpleSession = {
+        id: sessionId,
+        subject: selectedSubject,
+        academicLevel: selectedLevel,
+        qrCodeData: JSON.stringify(sessionData),
+        qrCodeUrl: qrCodeUrl,
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + (5 * 60 * 1000)),
+        isActive: true
+      }
+      
+      // Save to localStorage
+      localStorage.setItem('current_simple_session', JSON.stringify(newSession))
+      localStorage.setItem('simple_attendees', JSON.stringify([]))
+      
+      // Save to Supabase
+      const supabase = createClient()
+      if (supabase) {
+        await supabase
+          .from('attendance_sessions')
+          .insert({
+            id: sessionId,
+            subject_name: selectedSubject,
+            academic_level: selectedLevel,
+            qr_data: JSON.stringify(sessionData),
+            token: sessionId,
+            expires_at: new Date(Date.now() + (5 * 60 * 1000)).toISOString(),
+            session_date: new Date().toISOString().split('T')[0],
+            session_time: new Date().toTimeString().split(' ')[0],
+            is_active: true,
+            instructor_id: admin?.id || 'unknown'
+          })
+      }
+      
+      // Update state
+      setGeneratedQR(qrCodeDataUrl)
+      setGeneratedQRUrl(qrCodeUrl)
+      setCurrentSession(newSession)
+      setAttendees([])
+      
+      // Reload stats
+      loadDashboardStats()
+      
+      toast.success("QR Code Generated!", {
+        description: `Valid for 5 minutes - ${selectedSubject}`,
+        duration: 4000
+      })
+      
+    } catch (error) {
+      console.error("Error generating QR:", error)
+      toast.error("Failed to generate QR code")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Simulate real-time attendance updates
   useEffect(() => {
@@ -215,32 +289,46 @@ export default function SimpleAdminDashboard() {
           console.error("Error updating attendees:", e)
         }
       }
-    }, 2000) // Check every 2 seconds
+      
+      // Load stats periodically
+      loadDashboardStats()
+    }, 5000) // Check every 5 seconds
     
     return () => clearInterval(interval)
   }, [currentSession])
 
   // End current session
-  const endSession = () => {
+  const endSession = async () => {
+    if (currentSession) {
+      // Update in Supabase
+      const supabase = createClient()
+      if (supabase) {
+        await supabase
+          .from('attendance_sessions')
+          .update({ is_active: false })
+          .eq('id', currentSession.id)
+      }
+    }
+    
     localStorage.removeItem('current_simple_session')
     setCurrentSession(null)
     setGeneratedQR(null)
+    setGeneratedQRUrl(null)
     setAttendees([])
     setSelectedSubject("")
     setSelectedLevel("")
     toast.success("Session ended")
+    
+    // Reload stats
+    loadDashboardStats()
   }
 
-  // Handle admin logout
-  const handleLogout = () => {
-    localStorage.removeItem('current_simple_admin')
-    router.push('/simple-auth/admin/login')
-    toast.success("Logged out successfully")
-  }
-
-  // Navigate to Supabase dashboard
-  const goToSupabaseDashboard = () => {
-    router.push('/admin/simple-supabase')
+  // Copy QR code URL to clipboard
+  const copyQRUrl = () => {
+    if (generatedQRUrl) {
+      navigator.clipboard.writeText(generatedQRUrl)
+      toast.success("Copied to clipboard!")
+    }
   }
 
   // Format time remaining
@@ -258,6 +346,13 @@ export default function SimpleAdminDashboard() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
+  // Handle admin logout
+  const handleLogout = () => {
+    localStorage.removeItem('currentAdmin')
+    router.push('/')
+    toast.success("Logged out successfully")
+  }
+
   // If no admin data, don't render the dashboard
   if (!admin) {
     return null
@@ -269,8 +364,8 @@ export default function SimpleAdminDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Simple Attendance System</h1>
-            <p className="text-muted-foreground">Generate QR codes for student attendance</p>
+            <h1 className="text-2xl font-bold text-foreground">Supabase Admin Dashboard</h1>
+            <p className="text-muted-foreground">Generate QR codes with Supabase integration</p>
           </div>
           <div className="flex items-center gap-2">
             <Button 
@@ -292,29 +387,49 @@ export default function SimpleAdminDashboard() {
               Welcome, {admin.name}
             </CardTitle>
             <CardDescription>
-              Administrator Dashboard
+              Administrator Dashboard with Supabase
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className="flex items-center gap-4">
-                <Badge variant="secondary">{admin.email}</Badge>
-                <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/20">
-                  {admin.role}
-                </Badge>
-              </div>
-              <Button 
-                onClick={goToSupabaseDashboard}
-                variant="outline"
-                size="sm"
-                className="w-full sm:w-auto"
-              >
-                <Database className="w-4 h-4 mr-2" />
-                Supabase Dashboard
-              </Button>
+            <div className="flex items-center gap-4">
+              <Badge variant="secondary">{admin.email}</Badge>
+              <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/20">
+                {admin.role}
+              </Badge>
             </div>
           </CardContent>
         </Card>
+
+        {/* Dashboard Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
+                  <BookOpen className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Sessions Today</p>
+                  <p className="text-2xl font-bold">{sessionsToday}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
+                  <Users className="w-5 h-5 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Attendees</p>
+                  <p className="text-2xl font-bold">{totalAttendees}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Session Status */}
         {currentSession && (
@@ -449,6 +564,23 @@ export default function SimpleAdminDashboard() {
                       />
                     </div>
                   </div>
+                  
+                  {generatedQRUrl && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Students can scan this QR code with their phone's camera app
+                      </p>
+                      <Button 
+                        onClick={copyQRUrl}
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                      >
+                        <Link className="w-4 h-4 mr-2" />
+                        Copy QR Link
+                      </Button>
+                    </div>
+                  )}
                   
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div className="flex items-center gap-2">
