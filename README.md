@@ -38,6 +38,13 @@ A comprehensive attendance management system built with Next.js, Supabase, and m
   - Performance dashboard with stats and metrics
   - Admin grading management and report export
 
+- **New External Attendance System (Third System)**
+  - Completely new system where students scan QR codes with native camera apps
+  - Automatic redirect to student dashboard after scanning
+  - Instant attendance recording with live updates for admins
+  - Grading management system with PDF/Excel export
+  - No in-app QR scanning required for students
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -84,6 +91,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 2. **Admins**: Access admin panel for attendance monitoring, grading management, and reporting
 3. **Super Admin**: Full system configuration and user management
 4. **Simple Navigation**: Choose between simple and Supabase-integrated systems
+5. **External Attendance**: New third system for native camera QR scanning
 
 ## 🔧 Configuration
 
@@ -99,6 +107,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 - [Deployment Guide](./DEPLOYMENT_GUIDE.md)
 - [Simple Supabase System](./SIMPLE_SUPABASE_SYSTEM.md)
 - [External Attendance System](./EXTERNAL_ATTENDANCE_SYSTEM.md)
+- [New External Attendance System](./NEW_EXTERNAL_ATTENDANCE_SYSTEM.md)
 
 ## 🛠️ Tech Stack
 
