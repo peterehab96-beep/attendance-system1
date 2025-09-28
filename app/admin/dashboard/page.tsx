@@ -14,6 +14,7 @@
  */
 
 import { useState, useEffect } from "react"
+import { ErrorBoundary } from "@/components/error-boundary"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -36,7 +37,7 @@ import { AttendanceMonitor } from "@/components/attendance-monitor"
 import { useRouter } from "next/navigation"
 import { useAttendanceStore } from "@/lib/attendance-store"
 import { academicLevels, subjectsByLevel } from "@/lib/subjects-data"
-import { createClient } from "@supabase/supabase-js"
+import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 
 interface AdminData {
@@ -59,12 +60,22 @@ export default function AdminDashboardPage() {
   const allSessions = store.getAllSessions()
 
   useEffect(() => {
+    // Only run on client side
+    if (typeof window === 'undefined') {
+      return
+    }
+    
     loadAdminData()
     loadDashboardStats()
   }, [])
 
   const loadAdminData = async () => {
     try {
+      // Ensure we're on the client side
+      if (typeof window === 'undefined') {
+        return
+      }
+      
       // Load admin data from localStorage
       const localAdmin = localStorage.getItem('currentAdmin')
       
@@ -94,13 +105,10 @@ export default function AdminDashboardPage() {
 
   const loadDashboardStats = async () => {
     try {
-      // Load stats from Supabase if available
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      // Try to load stats from Supabase if available
+      const supabase = createClient()
       
-      if (supabaseUrl && supabaseKey) {
-        const supabase = createClient(supabaseUrl, supabaseKey)
-        
+      if (supabase) {
         // Get today's sessions
         const today = new Date().toISOString().split('T')[0]
         
@@ -175,12 +183,9 @@ export default function AdminDashboardPage() {
         store.endSession(currentSession.id)
         
         // Try to update in Supabase
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        const supabase = createClient()
         
-        if (supabaseUrl && supabaseKey) {
-          const supabase = createClient(supabaseUrl, supabaseKey)
-          
+        if (supabase) {
           await supabase
             .from('attendance_sessions')
             .update({ is_active: false })
@@ -237,193 +242,195 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-gray-900 dark:to-gray-800">
-      <div className="container mx-auto px-4 py-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <Button
-            variant="ghost"
-            onClick={() => router.back()}
-            className="flex items-center space-x-2"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back</span>
-          </Button>
-          
-          <div className="text-center">
-            <h1 className="text-3xl font-bold text-foreground">Admin Dashboard</h1>
-            <p className="text-muted-foreground">Welcome back, {admin.name}</p>
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-gray-900 dark:to-gray-800">
+        <div className="container mx-auto px-4 py-6">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <Button
+              variant="ghost"
+              onClick={() => router.back()}
+              className="flex items-center space-x-2"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back</span>
+            </Button>
+            
+            <div className="text-center">
+              <h1 className="text-3xl font-bold text-foreground">Admin Dashboard</h1>
+              <p className="text-muted-foreground">Welcome back, {admin.name}</p>
+            </div>
+            
+            <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+              <Shield className="w-3 h-3 mr-1" />
+              {admin.role}
+            </Badge>
           </div>
-          
-          <Badge variant="secondary" className="bg-blue-100 text-blue-700">
-            <Shield className="w-3 h-3 mr-1" />
-            {admin.role}
-          </Badge>
-        </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <QrCode className="w-8 h-8 text-blue-500" />
-                <div>
-                  <p className="text-2xl font-bold">{sessionsToday}</p>
-                  <p className="text-sm text-muted-foreground">Sessions Today</p>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-2">
+                  <QrCode className="w-8 h-8 text-blue-500" />
+                  <div>
+                    <p className="text-2xl font-bold">{sessionsToday}</p>
+                    <p className="text-sm text-muted-foreground">Sessions Today</p>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <Users className="w-8 h-8 text-green-500" />
-                <div>
-                  <p className="text-2xl font-bold">{totalAttendees}</p>
-                  <p className="text-sm text-muted-foreground">Total Attendees</p>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-2">
+                  <Users className="w-8 h-8 text-green-500" />
+                  <div>
+                    <p className="text-2xl font-bold">{totalAttendees}</p>
+                    <p className="text-sm text-muted-foreground">Total Attendees</p>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <CheckCircle className="w-8 h-8 text-emerald-500" />
-                <div>
-                  <p className="text-2xl font-bold">{currentSession ? "1" : "0"}</p>
-                  <p className="text-sm text-muted-foreground">Active Sessions</p>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="w-8 h-8 text-emerald-500" />
+                  <div>
+                    <p className="text-2xl font-bold">{currentSession ? "1" : "0"}</p>
+                    <p className="text-sm text-muted-foreground">Active Sessions</p>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <Clock className="w-8 h-8 text-orange-500" />
-                <div>
-                  <p className="text-2xl font-bold">{allSessions.length}</p>
-                  <p className="text-sm text-muted-foreground">Total Sessions</p>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-2">
+                  <Clock className="w-8 h-8 text-orange-500" />
+                  <div>
+                    <p className="text-2xl font-bold">{allSessions.length}</p>
+                    <p className="text-sm text-muted-foreground">Total Sessions</p>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </div>
 
-        {/* Active Session Alert */}
-        {currentSession && (
-          <Alert className="mb-6 border-green-200 bg-green-50 text-green-800">
-            <CheckCircle className="w-4 h-4" />
-            <AlertDescription className="flex items-center justify-between">
-              <span>
-                <strong>Active Session:</strong> {currentSession.subject} - {currentSession.academicLevel}
-                <br />
-                <span className="text-sm">
-                  {currentSession.attendees.length} students attended • Expires: {currentSession.expiresAt.toLocaleTimeString()}
+          {/* Active Session Alert */}
+          {currentSession && (
+            <Alert className="mb-6 border-green-200 bg-green-50 text-green-800">
+              <CheckCircle className="w-4 h-4" />
+              <AlertDescription className="flex items-center justify-between">
+                <span>
+                  <strong>Active Session:</strong> {currentSession.subject} - {currentSession.academicLevel}
+                  <br />
+                  <span className="text-sm">
+                    {currentSession.attendees.length} students attended • Expires: {currentSession.expiresAt.toLocaleTimeString()}
+                  </span>
                 </span>
-              </span>
-              <Button 
-                size="sm" 
-                variant="destructive" 
-                onClick={handleEndSession}
-                className="ml-4"
-              >
-                End Session
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Main Content Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="qr-generator" className="flex items-center space-x-2">
-              <QrCode className="w-4 h-4" />
-              <span>QR Generator</span>
-            </TabsTrigger>
-            <TabsTrigger value="monitor" className="flex items-center space-x-2">
-              <Users className="w-4 h-4" />
-              <span>Live Monitor</span>
-            </TabsTrigger>
-            <TabsTrigger value="reports" className="flex items-center space-x-2">
-              <BarChart3 className="w-4 h-4" />
-              <span>Reports</span>
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="flex items-center space-x-2">
-              <Settings className="w-4 h-4" />
-              <span>Settings</span>
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="qr-generator" className="space-y-6">
-            <QRCodeGenerator
-              academicLevels={[...academicLevels]}
-              subjectsByLevel={Object.fromEntries(
-                Object.entries(subjectsByLevel).map(([key, value]) => [key, [...value]])
-              )}
-              onSessionCreated={handleSessionCreated}
-              hasActiveSession={!!currentSession}
-            />
-          </TabsContent>
-
-          <TabsContent value="monitor" className="space-y-6">
-            <AttendanceMonitor 
-              currentSession={currentSession} 
-              onEndSession={handleEndSession} 
-            />
-          </TabsContent>
-
-          <TabsContent value="reports" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <FileText className="w-5 h-5" />
-                  <span>Attendance Reports</span>
-                </CardTitle>
-                <CardDescription>
-                  Generate and download attendance reports
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="text-center py-12">
-                <BarChart3 className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium mb-2">Reports Coming Soon</h3>
-                <p className="text-muted-foreground mb-6">
-                  Advanced reporting features are under development
-                </p>
-                <Button onClick={navigateToReports}>
-                  Request Early Access
+                <Button 
+                  size="sm" 
+                  variant="destructive" 
+                  onClick={handleEndSession}
+                  className="ml-4"
+                >
+                  End Session
                 </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </AlertDescription>
+            </Alert>
+          )}
 
-          <TabsContent value="settings" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Settings className="w-5 h-5" />
-                  <span>System Settings</span>
-                </CardTitle>
-                <CardDescription>
-                  Configure attendance system preferences
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="text-center py-12">
-                <Settings className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium mb-2">Settings Panel</h3>
-                <p className="text-muted-foreground mb-6">
-                  Advanced configuration options coming soon
-                </p>
-                <Button onClick={navigateToSettings}>
-                  Configure System
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+          {/* Main Content Tabs */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="qr-generator" className="flex items-center space-x-2">
+                <QrCode className="w-4 h-4" />
+                <span>QR Generator</span>
+              </TabsTrigger>
+              <TabsTrigger value="monitor" className="flex items-center space-x-2">
+                <Users className="w-4 h-4" />
+                <span>Live Monitor</span>
+              </TabsTrigger>
+              <TabsTrigger value="reports" className="flex items-center space-x-2">
+                <BarChart3 className="w-4 h-4" />
+                <span>Reports</span>
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="flex items-center space-x-2">
+                <Settings className="w-4 h-4" />
+                <span>Settings</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="qr-generator" className="space-y-6">
+              <QRCodeGenerator
+                academicLevels={[...academicLevels]}
+                subjectsByLevel={Object.fromEntries(
+                  Object.entries(subjectsByLevel).map(([key, value]) => [key, [...value]])
+                )}
+                onSessionCreated={handleSessionCreated}
+                hasActiveSession={!!currentSession}
+              />
+            </TabsContent>
+
+            <TabsContent value="monitor" className="space-y-6">
+              <AttendanceMonitor 
+                currentSession={currentSession} 
+                onEndSession={handleEndSession} 
+              />
+            </TabsContent>
+
+            <TabsContent value="reports" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <FileText className="w-5 h-5" />
+                    <span>Attendance Reports</span>
+                  </CardTitle>
+                  <CardDescription>
+                    Generate and download attendance reports
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="text-center py-12">
+                  <BarChart3 className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Reports Coming Soon</h3>
+                  <p className="text-muted-foreground mb-6">
+                    Advanced reporting features are under development
+                  </p>
+                  <Button onClick={navigateToReports}>
+                    Request Early Access
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="settings" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Settings className="w-5 h-5" />
+                    <span>System Settings</span>
+                  </CardTitle>
+                  <CardDescription>
+                    Configure attendance system preferences
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="text-center py-12">
+                  <Settings className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Settings Panel</h3>
+                  <p className="text-muted-foreground mb-6">
+                    Advanced configuration options coming soon
+                  </p>
+                  <Button onClick={navigateToSettings}>
+                    Configure System
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   )
 }

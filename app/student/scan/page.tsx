@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { ArrowLeft, User, BookOpen, Clock, CheckCircle, AlertCircle } from "lucide-react"
 import { QRScanner } from "@/components/qr-scanner"
 import { useRouter } from "next/navigation"
-import { createClient } from "@supabase/supabase-js"
+import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 
 interface Student {
@@ -45,11 +45,21 @@ export default function StudentScanPage() {
   const [attendanceHistory, setAttendanceHistory] = useState<any[]>([])
 
   useEffect(() => {
+    // Only run on client side
+    if (typeof window === 'undefined') {
+      return
+    }
+    
     loadStudentData()
   }, [])
 
   const loadStudentData = async () => {
     try {
+      // Ensure we're on the client side
+      if (typeof window === 'undefined') {
+        return
+      }
+      
       // Load student data from localStorage or Supabase
       const localStudent = localStorage.getItem('currentStudent')
       
@@ -76,12 +86,9 @@ export default function StudentScanPage() {
   const loadAttendanceHistory = async (studentId: string) => {
     try {
       // Try to load from Supabase first
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      const supabase = createClient()
       
-      if (supabaseUrl && supabaseKey) {
-        const supabase = createClient(supabaseUrl, supabaseKey)
-        
+      if (supabase) {
         const { data, error } = await supabase
           .from('attendance_records')
           .select(`
@@ -175,12 +182,9 @@ export default function StudentScanPage() {
 
       // Try to save to Supabase
       try {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        const supabase = createClient()
         
-        if (supabaseUrl && supabaseKey) {
-          const supabase = createClient(supabaseUrl, supabaseKey)
-          
+        if (supabase) {
           // Check if already attended
           const { data: existingRecord } = await supabase
             .from('attendance_records')

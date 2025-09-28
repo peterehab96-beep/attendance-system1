@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge"
 import { Camera, QrCode, CheckCircle, AlertCircle, RefreshCw, Scan, Upload, Info, AlertTriangle } from "lucide-react"
 import { useAttendanceStore } from "@/lib/attendance-store"
 import { toast } from 'sonner'
-import { createClient } from "@supabase/supabase-js"
+import { createClient } from "@/lib/supabase/client"
 
 // Dynamic import for html5-qrcode to avoid SSR issues
 import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode"
@@ -319,12 +319,9 @@ export function QRScanner({ student, onSuccessfulScan }: QRScannerProps) {
       let sessionExists = false
       
       try {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        const supabase = createClient()
         
-        if (supabaseUrl && supabaseKey) {
-          const supabase = createClient(supabaseUrl, supabaseKey)
-          
+        if (supabase) {
           const { data: session, error } = await supabase
             .from('attendance_sessions')
             .select('id, is_active, expires_at, token')

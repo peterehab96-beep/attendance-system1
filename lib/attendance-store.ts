@@ -56,6 +56,11 @@ class AttendanceStore {
 
   private loadFromLocalStorage() {
     try {
+      // Only run on client side
+      if (typeof window === 'undefined') {
+        return
+      }
+      
       // Load any existing data from localStorage for offline functionality
       const savedStudents = localStorage.getItem('attendance_students')
       const savedSessions = localStorage.getItem('attendance_sessions') 
@@ -71,6 +76,11 @@ class AttendanceStore {
 
   private saveToLocalStorage() {
     try {
+      // Only run on client side
+      if (typeof window === 'undefined') {
+        return
+      }
+      
       localStorage.setItem('attendance_students', JSON.stringify(this.students))
       localStorage.setItem('attendance_sessions', JSON.stringify(this.sessions))
       localStorage.setItem('attendance_records', JSON.stringify(this.attendanceRecords))
