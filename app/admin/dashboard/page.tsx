@@ -56,8 +56,8 @@ export default function AdminDashboardPage() {
   const [totalAttendees, setTotalAttendees] = useState(0)
   
   const store = useAttendanceStore()
-  const currentSession = store.getActiveSession()
-  const allSessions = store.getAllSessions()
+  const [currentSession, setCurrentSession] = useState<any>(null)
+  const [allSessions, setAllSessions] = useState<any[]>([])
 
   useEffect(() => {
     // Only run on client side
@@ -67,6 +67,18 @@ export default function AdminDashboardPage() {
     
     loadAdminData()
     loadDashboardStats()
+    
+    // Load sessions from store
+    const loadSessions = () => {
+      setCurrentSession(store.getActiveSession())
+      setAllSessions(store.getAllSessions())
+    }
+    
+    loadSessions()
+    
+    // Set up interval to refresh sessions
+    const interval = setInterval(loadSessions, 5000)
+    return () => clearInterval(interval)
   }, [])
 
   const loadAdminData = async () => {
@@ -105,6 +117,11 @@ export default function AdminDashboardPage() {
 
   const loadDashboardStats = async () => {
     try {
+      // Ensure we're on the client side
+      if (typeof window === 'undefined') {
+        return
+      }
+      
       // Try to load stats from Supabase if available
       const supabase = createClient()
       
@@ -181,6 +198,9 @@ export default function AdminDashboardPage() {
       try {
         // End session in local store
         store.endSession(currentSession.id)
+        
+        // Update local state
+        setCurrentSession(null)
         
         // Try to update in Supabase
         const supabase = createClient()
@@ -327,7 +347,7 @@ export default function AdminDashboardPage() {
                   <strong>Active Session:</strong> {currentSession.subject} - {currentSession.academicLevel}
                   <br />
                   <span className="text-sm">
-                    {currentSession.attendees.length} students attended • Expires: {currentSession.expiresAt.toLocaleTimeString()}
+                    {currentSession.attendees?.length || 0} students attended • Expires: {new Date(currentSession.expiresAt).toLocaleTimeString()}
                   </span>
                 </span>
                 <Button 

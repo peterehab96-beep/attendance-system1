@@ -71,13 +71,43 @@ export default function StudentScanPage() {
         // Load attendance history
         await loadAttendanceHistory(studentData.id)
       } else {
-        // Redirect to login if no student data
-        router.push('/')
+        // Create demo student if none exists
+        const demoStudent: Student = {
+          id: 'student_demo_' + Date.now(),
+          name: 'Demo Student',
+          email: 'student@demo.com',
+          academicLevel: 'Second Year',
+          subjects: [
+            "Western Rules & Solfege 3",
+            "Hymn Singing",
+            "Rhythmic Movement 2"
+          ]
+        }
+        setStudent(demoStudent)
+        localStorage.setItem('currentStudent', JSON.stringify(demoStudent))
+        console.log("[Student Scan] Created demo student")
+        
+        // Load attendance history
+        await loadAttendanceHistory(demoStudent.id)
       }
     } catch (error) {
       console.error("[Student Scan] Error loading student data:", error)
       toast.error("Failed to load student data")
-      router.push('/')
+      
+      // Create demo student as fallback
+      const demoStudent: Student = {
+        id: 'student_demo_' + Date.now(),
+        name: 'Demo Student',
+        email: 'student@demo.com',
+        academicLevel: 'Second Year',
+        subjects: [
+          "Western Rules & Solfege 3",
+          "Hymn Singing",
+          "Rhythmic Movement 2"
+        ]
+      }
+      setStudent(demoStudent)
+      localStorage.setItem('currentStudent', JSON.stringify(demoStudent))
     } finally {
       setIsLoading(false)
     }
@@ -85,6 +115,11 @@ export default function StudentScanPage() {
 
   const loadAttendanceHistory = async (studentId: string) => {
     try {
+      // Ensure we're on the client side
+      if (typeof window === 'undefined') {
+        return
+      }
+      
       // Try to load from Supabase first
       const supabase = createClient()
       
@@ -123,6 +158,14 @@ export default function StudentScanPage() {
   }
 
   const handleSuccessfulScan = async (qrData: string): Promise<AttendanceResult> => {
+    // Ensure we're on the client side
+    if (typeof window === 'undefined') {
+      return {
+        success: false,
+        message: "Client-side operation required"
+      }
+    }
+    
     if (!student) {
       return {
         success: false,
