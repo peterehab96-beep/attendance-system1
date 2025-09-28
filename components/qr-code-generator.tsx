@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { QrCode, RefreshCw, Download, Copy, CheckCircle, AlertCircle, Clock, Users } from "lucide-react"
 import { toast } from "sonner"
 import QRCodeLib from "qrcode"
-import { createClient } from "@supabase/supabase-js"
+import { createClient } from "@/lib/supabase/client"
 
 interface QRSessionData {
   sessionId: string
@@ -109,12 +109,9 @@ export function QRCodeGenerator({
       // Try to save to Supabase, fallback to local storage
       try {
         // Create Supabase client for this operation
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        const supabase = createClient()
         
-        if (supabaseUrl && supabaseKey) {
-          const supabase = createClient(supabaseUrl, supabaseKey)
-          
+        if (supabase) {
           const { data, error } = await supabase
             .from('attendance_sessions')
             .insert([supabaseSession])
