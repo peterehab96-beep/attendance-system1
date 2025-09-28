@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge"
 import { Camera, QrCode, CheckCircle, AlertCircle, RefreshCw, Scan, Upload, Info, AlertTriangle } from "lucide-react"
 import { useAttendanceStore } from "@/lib/attendance-store"
 import { toast } from 'sonner'
+import { createClient } from "@supabase/supabase-js"
 
 // Dynamic import for html5-qrcode to avoid SSR issues
 import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode"
@@ -275,47 +276,105 @@ export function QRScanner({ student, onSuccessfulScan }: QRScannerProps) {
         return
       }
       
-      // Check if there's an active session from admin for this subject
-      const activeSession = attendanceStore.getActiveSession()
-      
-      if (!activeSession) {
+      // Parse QR data
+      let qrSessionData
+      try {
+        qrSessionData = JSON.parse(qrData)
+      } catch (parseError) {
         setScanResult({
           success: false,
-          message: "No active attendance session found. Ask your instructor to generate a QR code first."
+          message: "Invalid QR code format. Please scan a valid attendance QR code."
         })
         return
       }
-      
+
+      // Validate QR data structure
+      if (!qrSessionData.sessionId || !qrSessionData.token || !qrSessionData.subject) {
+        setScanResult({
+          success: false,
+          message: "QR code is missing required data. Please scan a valid attendance QR code."
+        })
+        return
+      }
+
+      // Check expiration
+      if (Date.now() > qrSessionData.expiresAt) {
+        setScanResult({
+          success: false,
+          message: "QR code has expired. Please ask your instructor to generate a new one."
+        })
+        return
+      }
+
       // Validate session matches student's subject
-      if (activeSession.subject !== selectedSubject) {
+      if (qrSessionData.subject !== selectedSubject) {
         setScanResult({
           success: false,
-          message: `QR code is for ${activeSession.subject}, but you selected ${selectedSubject}. Please select the correct subject.`
+          message: `QR code is for ${qrSessionData.subject}, but you selected ${selectedSubject}. Please select the correct subject.`
         })
         return
       }
+
+      // Try to verify session exists in Supabase or localStorage
+      let sessionExists = false
       
-      // Check if session has expired
-      if (new Date() > activeSession.expiresAt) {
-        setScanResult({
-          success: false,
-          message: "QR code has expired. Ask your instructor to generate a new one."
-        })
-        return
+      try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        
+        if (supabaseUrl && supabaseKey) {
+          const supabase = createClient(supabaseUrl, supabaseKey)
+          
+          const { data: session, error } = await supabase
+            .from('attendance_sessions')
+            .select('id, is_active, expires_at, token')
+            .eq('id', qrSessionData.sessionId)
+            .eq('is_active', true)
+            .single()
+
+          if (!error && session && session.token === qrSessionData.token) {
+            sessionExists = true
+            console.log("[QR Scanner] Session verified in Supabase")
+          }
+        }
+      } catch (supabaseError) {
+        console.warn("[QR Scanner] Supabase verification failed, checking localStorage:", supabaseError)
       }
       
-      // Validate QR data matches the active session
-      if (qrData !== activeSession.qrCode) {
+      // Fallback to localStorage verification
+      if (!sessionExists) {
+        const localSessionKey = `qr_session_${qrSessionData.sessionId}`
+        const localSession = localStorage.getItem(localSessionKey)
+        
+        if (localSession) {
+          const parsedSession = JSON.parse(localSession)
+          if (parsedSession.token === qrSessionData.token && parsedSession.is_active) {
+            sessionExists = true
+            console.log("[QR Scanner] Session verified in localStorage")
+          }
+        }
+      }
+      
+      // Check if we also have an active session in the store (backward compatibility)
+      if (!sessionExists) {
+        const activeSession = attendanceStore.getActiveSession()
+        if (activeSession && activeSession.qrCode === qrData) {
+          sessionExists = true
+          console.log("[QR Scanner] Session verified in store")
+        }
+      }
+      
+      if (!sessionExists) {
         setScanResult({
           success: false,
-          message: "Invalid QR code. Please scan the QR code shown by your instructor."
+          message: "Invalid or expired QR code. Please ask your instructor to generate a new one."
         })
         return
       }
       
       console.log("[QR Scanner] QR validation successful, marking attendance...")
       
-      // Process the attendance
+      // Process the attendance using the callback
       const result = await onSuccessfulScan(qrData)
       console.log("[QR Scanner] Attendance marking result:", result)
       

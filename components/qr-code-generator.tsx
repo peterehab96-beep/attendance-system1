@@ -1,13 +1,33 @@
 "use client"
 
-import { useState } from "react"
+/*
+ * Installation instructions:
+ * npm install qrcode @types/qrcode react-qr-code
+ * 
+ * This component generates real QR codes using the 'qrcode' library
+ * and stores session data in Supabase for verification.
+ */
+
+import { useState, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { QrCode, RefreshCw, Download, Copy, CheckCircle, AlertCircle } from "lucide-react"
+import { QrCode, RefreshCw, Download, Copy, CheckCircle, AlertCircle, Clock, Users } from "lucide-react"
 import { toast } from "sonner"
+import QRCodeLib from "qrcode"
+import { createClient } from "@supabase/supabase-js"
+
+interface QRSessionData {
+  sessionId: string
+  token: string
+  academicLevel: string
+  subject: string
+  timestamp: number
+  expiresAt: number
+  instructorId?: string
+}
 
 interface QRCodeGeneratorProps {
   academicLevels: string[]
@@ -22,144 +42,161 @@ export function QRCodeGenerator({
   onSessionCreated,
   hasActiveSession,
 }: QRCodeGeneratorProps) {
-  const [selectedLevel, setSelectedLevel] = useState("")
-  const [selectedSubject, setSelectedSubject] = useState("")
+  const [selectedLevel, setSelectedLevel] = useState<string>("")
+  const [selectedSubject, setSelectedSubject] = useState<string>("")
   const [generatedQR, setGeneratedQR] = useState<string | null>(null)
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [sessionData, setSessionData] = useState<QRSessionData | null>(null)
+  const [isGenerating, setIsGenerating] = useState<boolean>(false)
+  const [copied, setCopied] = useState<boolean>(false)
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
 
   const generateQRCode = async () => {
-    if (!selectedLevel || !selectedSubject) return
-
-    setIsGenerating(true)
-
-    // Generate unique session ID and QR code data with proper security
-    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const secureToken = Math.random().toString(36).substring(2, 15) + 
-                       Math.random().toString(36).substring(2, 15) + 
-                       Date.now().toString(36)
-    
-    const expiryTime = Date.now() + (30 * 60 * 1000) // 30 minutes
-    
-    const qrData = JSON.stringify({
-      sessionId: newSessionId,
-      token: secureToken,
-      academicLevel: selectedLevel,
-      subject: selectedSubject,
-      timestamp: Date.now(),
-      expiresAt: expiryTime,
-    })
-
-    // Simulate QR code generation delay
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-
-    // Generate QR code URL (using a placeholder QR service)
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrData)}`
-
-    setGeneratedQR(qrCodeUrl)
-    setSessionId(newSessionId)
-
-    // Create session object with enhanced data
-    const newSession = {
-      id: newSessionId,
-      academicLevel: selectedLevel,
-      subject: selectedSubject,
-      qrCode: qrData,
-      token: secureToken,
-      expiresAt: new Date(expiryTime),
-      createdAt: new Date(),
-      isActive: true,
-      attendees: [],
+    if (!selectedLevel || !selectedSubject) {
+      toast.error("Please select both academic level and subject")
+      return
     }
 
-    // Use the improved createSession method
-    await onSessionCreated(newSession)
-    setIsGenerating(false)
+    setIsGenerating(true)
+    console.log("[QR Generator] Starting QR code generation...")
+
+    try {
+      // Generate secure session data
+      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      const secureToken = crypto.randomUUID() + Date.now().toString(36)
+      const expiryTime = Date.now() + (5 * 60 * 1000) // 5 minutes as requested
+      
+      const qrSessionData: QRSessionData = {
+        sessionId,
+        token: secureToken,
+        academicLevel: selectedLevel,
+        subject: selectedSubject,
+        timestamp: Date.now(),
+        expiresAt: expiryTime,
+      }
+
+      const qrDataString = JSON.stringify(qrSessionData)
+      console.log("[QR Generator] Session data created:", { sessionId, subject: selectedSubject, expiresIn: '5 minutes' })
+
+      // Generate QR code as data URL using qrcode library
+      const qrCodeDataUrl = await QRCodeLib.toDataURL(qrDataString, {
+        width: 512,
+        margin: 1,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        },
+        errorCorrectionLevel: 'M'
+      })
+
+      console.log("[QR Generator] QR code generated successfully")
+
+      // Save session to Supabase
+      const supabaseSession = {
+        id: sessionId,
+        qr_data: qrDataString,
+        subject_name: selectedSubject,
+        academic_level: selectedLevel,
+        token: secureToken,
+        expires_at: new Date(expiryTime).toISOString(),
+        session_date: new Date().toISOString().split('T')[0],
+        session_time: new Date().toTimeString().split(' ')[0],
+        session_type: 'lecture',
+        is_active: true,
+        instructor_id: 'demo-instructor-id' // In real app, get from auth
+      }
+
+      // Try to save to Supabase, fallback to local storage
+      try {
+        // Create Supabase client for this operation
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        
+        if (supabaseUrl && supabaseKey) {
+          const supabase = createClient(supabaseUrl, supabaseKey)
+          
+          const { data, error } = await supabase
+            .from('attendance_sessions')
+            .insert([supabaseSession])
+            .select()
+            .single()
+
+          if (error) throw error
+          console.log("[QR Generator] Session saved to Supabase:", data.id)
+          toast.success("QR session saved to database")
+        } else {
+          throw new Error("Supabase not configured")
+        }
+      } catch (supabaseError) {
+        console.warn("[QR Generator] Supabase save failed, using local storage:", supabaseError)
+        // Fallback to local storage for demo
+        localStorage.setItem(`qr_session_${sessionId}`, JSON.stringify(supabaseSession))
+        toast.info("QR session saved locally (demo mode)")
+      }
+
+      // Update component state
+      setGeneratedQR(qrCodeDataUrl)
+      setQrCodeDataUrl(qrCodeDataUrl)
+      setSessionData(qrSessionData)
+
+      // Create session object for local state management
+      const localSession = {
+        id: sessionId,
+        academicLevel: selectedLevel,
+        subject: selectedSubject,
+        qrCode: qrDataString,
+        token: secureToken,
+        expiresAt: new Date(expiryTime),
+        createdAt: new Date(),
+        isActive: true,
+        attendees: [],
+      }
+
+      // Notify parent component
+      await onSessionCreated(localSession)
+      
+      toast.success("QR Code generated successfully!", {
+        description: `Valid for 5 minutes - ${selectedSubject}`,
+        duration: 4000
+      })
+
+    } catch (error: any) {
+      console.error("[QR Generator] Error generating QR code:", error)
+      toast.error("Failed to generate QR code", {
+        description: error.message || "Please try again"
+      })
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   const copyQRData = async () => {
-    if (!generatedQR) return
+    if (!sessionData) return
 
     try {
-      await navigator.clipboard.writeText(generatedQR)
+      const qrDataString = JSON.stringify(sessionData)
+      await navigator.clipboard.writeText(qrDataString)
       setCopied(true)
+      toast.success("QR data copied to clipboard")
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error("Failed to copy QR data:", err)
+      toast.error("Failed to copy QR data")
     }
   }
 
   const downloadQR = async () => {
-    if (!generatedQR) {
+    if (!qrCodeDataUrl || !sessionData) {
       toast.error('No QR code to download')
       return
     }
 
     try {
-      toast.loading('Preparing QR code download...', { duration: 2000 })
-      
-      // Create a higher quality canvas
-      const canvas = document.createElement("canvas")
-      const ctx = canvas.getContext("2d")
-      
-      if (!ctx) {
-        throw new Error('Canvas context not available')
-      }
-      
-      const img = new Image()
-      img.crossOrigin = "anonymous"
-      
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => {
-          try {
-            // Set high resolution for better quality
-            const scale = 4 // 4x higher resolution
-            canvas.width = img.width * scale
-            canvas.height = img.height * scale
-            
-            // Scale the context to draw the image at higher resolution
-            ctx.scale(scale, scale)
-            
-            // Use better image rendering
-            ctx.imageSmoothingEnabled = false
-            
-            // Draw the QR code
-            ctx.drawImage(img, 0, 0)
-            
-            resolve()
-          } catch (error) {
-            reject(error)
-          }
-        }
-        
-        img.onerror = () => {
-          reject(new Error('Failed to load QR code image'))
-        }
-        
-        img.src = generatedQR
-      })
-
-      // Convert to blob with high quality
-      const blob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(
-          (blob) => resolve(blob),
-          'image/png',
-          1.0 // Maximum quality
-        )
-      })
-
-      if (!blob) {
-        throw new Error('Failed to create image blob')
-      }
-
-      // Create download
-      const url = URL.createObjectURL(blob)
+      // Create download link with data URL
       const link = document.createElement("a")
+      const filename = `qr-attendance-${sessionData.subject.replace(/\s+/g, "-")}-${sessionData.academicLevel.replace(/\s+/g, "-")}-${new Date().toISOString().split('T')[0]}.png`
       
-      const filename = `attendance-qr-${selectedLevel.replace(/\s+/g, "-")}-${selectedSubject.replace(/\s+/g, "-")}-${new Date().toISOString().split('T')[0]}-${Date.now()}.png`
-      
-      link.href = url
+      link.href = qrCodeDataUrl
       link.download = filename
       link.style.display = 'none'
       
@@ -167,59 +204,17 @@ export function QRCodeGenerator({
       link.click()
       document.body.removeChild(link)
       
-      // Clean up
-      URL.revokeObjectURL(url)
-      
-      toast.success('💾 QR code downloaded successfully!', {
+      toast.success('QR code downloaded!', {
         description: `Saved as ${filename}`,
         duration: 3000,
       })
       
     } catch (error: any) {
       console.error("Download failed:", error)
-      
-      // Enhanced fallback method
-      try {
-        toast.loading('Trying alternative download method...', { duration: 2000 })
-        
-        // Create a simple download link
-        const link = document.createElement("a")
-        const filename = `attendance-qr-${selectedLevel.replace(/\s+/g, "-")}-${selectedSubject.replace(/\s+/g, "-")}-${Date.now()}.png`
-        
-        // Try data URL approach
-        if (generatedQR.startsWith('data:')) {
-          link.href = generatedQR
-        } else {
-          // Convert to data URL
-          const response = await fetch(generatedQR)
-          const blob = await response.blob()
-          link.href = URL.createObjectURL(blob)
-        }
-        
-        link.download = filename
-        link.style.display = 'none'
-        
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        
-        if (link.href.startsWith('blob:')) {
-          URL.revokeObjectURL(link.href)
-        }
-        
-        toast.success('QR code downloaded!', {
-          description: 'Downloaded using fallback method',
-          duration: 3000,
-        })
-        
-      } catch (fallbackError) {
-        console.error("Fallback download also failed:", fallbackError)
-        
-        toast.error('Download failed', {
-          description: 'Please right-click the QR code and select "Save image as..."',
-          duration: 5000,
-        })
-      }
+      toast.error('Download failed', {
+        description: 'Please right-click the QR code and select "Save image as..."',
+        duration: 5000,
+      })
     }
   }
 
@@ -227,7 +222,24 @@ export function QRCodeGenerator({
     setSelectedLevel("")
     setSelectedSubject("")
     setGeneratedQR(null)
-    setSessionId(null)
+    setSessionData(null)
+    setQrCodeDataUrl(null)
+    setCopied(false)
+    console.log("[QR Generator] Reset generator state")
+  }
+
+  const formatTimeRemaining = () => {
+    if (!sessionData) return "--:--"
+    
+    const now = Date.now()
+    const remaining = sessionData.expiresAt - now
+    
+    if (remaining <= 0) return "Expired"
+    
+    const minutes = Math.floor(remaining / 60000)
+    const seconds = Math.floor((remaining % 60000) / 1000)
+    
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
   return (
@@ -376,9 +388,12 @@ export function QRCodeGenerator({
                 <div className="flex justify-center">
                   <div className="p-3 sm:p-4 bg-white rounded-lg border-2 border-dashed border-border">
                     <img
-                      src={generatedQR || "/placeholder.svg"}
+                      src={qrCodeDataUrl || "/placeholder.svg"}
                       alt="Attendance QR Code"
                       className="w-48 h-48 sm:w-64 sm:h-64 max-w-full"
+                      style={{
+                        imageRendering: 'pixelated'
+                      }}
                     />
                   </div>
                 </div>
@@ -387,7 +402,7 @@ export function QRCodeGenerator({
                   <div className="flex items-center justify-between">
                     <span className="text-xs sm:text-sm text-muted-foreground">Session ID:</span>
                     <Badge variant="outline" className="font-mono text-xs">
-                      {sessionId?.slice(-8)}
+                      {sessionData?.sessionId.slice(-8)}
                     </Badge>
                   </div>
                   <div className="flex items-center justify-between">
@@ -403,6 +418,13 @@ export function QRCodeGenerator({
                     </Badge>
                   </div>
                   <div className="flex items-center justify-between">
+                    <span className="text-xs sm:text-sm text-muted-foreground">Expires in:</span>
+                    <Badge className="bg-orange-500/10 text-orange-500 border-orange-500/20 text-xs">
+                      <Clock className="w-3 h-3 mr-1" />
+                      {formatTimeRemaining()}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
                     <span className="text-xs sm:text-sm text-muted-foreground">Status:</span>
                     <Badge className="bg-green-500/10 text-green-500 border-green-500/20 text-xs">
                       <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse" />
@@ -414,7 +436,8 @@ export function QRCodeGenerator({
                 <Alert>
                   <CheckCircle className="w-4 h-4" />
                   <AlertDescription className="text-sm">
-                    QR code is ready! Students can now scan this code to mark their attendance for this session.
+                    QR code is ready! Students can scan this code to mark attendance. 
+                    <strong>Valid for 5 minutes only.</strong>
                   </AlertDescription>
                 </Alert>
               </div>
