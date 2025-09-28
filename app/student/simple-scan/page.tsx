@@ -19,23 +19,25 @@ import {
   Camera,
   Upload,
   Clock,
-  User
+  User,
+  LogOut
 } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode"
 
-interface StudentData {
+interface StudentUser {
   id: string
   name: string
   email: string
+  role: string
   academicLevel: string
   subjects: string[]
 }
 
 export default function SimpleStudentScanner() {
   const router = useRouter()
-  const [student, setStudent] = useState<StudentData | null>(null)
+  const [student, setStudent] = useState<StudentUser | null>(null)
   const [selectedSubject, setSelectedSubject] = useState("")
   const [isScanning, setIsScanning] = useState(false)
   const [scanResult, setScanResult] = useState<{ success: boolean; message: string } | null>(null)
@@ -45,35 +47,30 @@ export default function SimpleStudentScanner() {
   useEffect(() => {
     const loadStudentData = () => {
       try {
-        const localStudent = localStorage.getItem('currentStudent')
+        const localStudent = localStorage.getItem('current_simple_student')
         if (localStudent) {
           const studentData = JSON.parse(localStudent)
           setStudent(studentData)
           console.log("[Simple Scanner] Loaded student:", studentData.name)
         } else {
-          // Create demo student if none exists
-          const demoStudent: StudentData = {
-            id: 'student_demo_' + Date.now(),
-            name: 'Demo Student',
-            email: 'student@demo.com',
-            academicLevel: 'Second Year',
-            subjects: [
-              "Western Rules & Solfege 3",
-              "Hymn Singing",
-              "Rhythmic Movement 2"
-            ]
-          }
-          setStudent(demoStudent)
-          localStorage.setItem('currentStudent', JSON.stringify(demoStudent))
+          // Redirect to login if no student data
+          router.push('/simple-auth/student/login')
         }
       } catch (error) {
         console.error("[Simple Scanner] Error loading student:", error)
-        toast.error("Failed to load student data")
+        router.push('/simple-auth/student/login')
       }
     }
 
     loadStudentData()
-  }, [])
+  }, [router])
+
+  // Handle student logout
+  const handleLogout = () => {
+    localStorage.removeItem('current_simple_student')
+    router.push('/simple-auth/student/login')
+    toast.success("Logged out successfully")
+  }
 
   // Start camera scanning
   const startCameraScanning = () => {
@@ -296,6 +293,11 @@ export default function SimpleStudentScanner() {
     stopCameraScanning()
   }
 
+  // If no student data, don't render the scanner
+  if (!student) {
+    return null
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 dark:from-gray-900 dark:to-gray-800 p-4">
       <div className="max-w-4xl mx-auto">
@@ -305,41 +307,46 @@ export default function SimpleStudentScanner() {
             <h1 className="text-2xl font-bold text-foreground">Simple QR Scanner</h1>
             <p className="text-muted-foreground">Scan QR codes to mark attendance</p>
           </div>
-          <Button 
-            variant="outline" 
-            onClick={() => router.back()}
-          >
-            Back
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              onClick={handleLogout}
+              size="sm"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
 
         {/* Student Info */}
-        {student && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Student Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Name</p>
-                  <p className="font-medium">{student.name}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Academic Level</p>
-                  <Badge variant="secondary">{student.academicLevel}</Badge>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Enrolled Subjects</p>
-                  <p className="text-sm">{student.subjects.length} subjects</p>
-                </div>
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <User className="w-5 h-5" />
+              Welcome, {student.name}
+            </CardTitle>
+            <CardDescription>
+              Student Dashboard
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <p className="text-sm text-muted-foreground">Email</p>
+                <p className="font-medium">{student.email}</p>
               </div>
-            </CardContent>
-          </Card>
-        )}
+              <div>
+                <p className="text-sm text-muted-foreground">Academic Level</p>
+                <Badge variant="secondary">{student.academicLevel}</Badge>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Enrolled Subjects</p>
+                <p className="text-sm">{student.subjects.length} subjects</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Subject Selection */}
         <Card className="mb-6">

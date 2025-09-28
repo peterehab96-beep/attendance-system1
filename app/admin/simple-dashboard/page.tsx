@@ -18,7 +18,9 @@ import {
   AlertCircle, 
   Clock,
   Users,
-  BookOpen
+  BookOpen,
+  LogOut,
+  User
 } from "lucide-react"
 import { toast } from "sonner"
 import QRCode from "qrcode"
@@ -34,8 +36,16 @@ interface SimpleSession {
   isActive: boolean
 }
 
+interface AdminUser {
+  id: string
+  name: string
+  email: string
+  role: string
+}
+
 export default function SimpleAdminDashboard() {
   const router = useRouter()
+  const [admin, setAdmin] = useState<AdminUser | null>(null)
   const [selectedSubject, setSelectedSubject] = useState("")
   const [selectedLevel, setSelectedLevel] = useState("")
   const [generatedQR, setGeneratedQR] = useState<string | null>(null)
@@ -67,6 +77,28 @@ export default function SimpleAdminDashboard() {
       "Improvisation 2"
     ]
   }
+
+  // Load admin data on component mount
+  useEffect(() => {
+    const loadAdminData = () => {
+      try {
+        const localAdmin = localStorage.getItem('current_simple_admin')
+        if (localAdmin) {
+          const adminData = JSON.parse(localAdmin)
+          setAdmin(adminData)
+          console.log("[Simple Admin Dashboard] Loaded admin:", adminData.name)
+        } else {
+          // Redirect to login if no admin data
+          router.push('/simple-auth/admin/login')
+        }
+      } catch (error) {
+        console.error("[Simple Admin Dashboard] Error loading admin:", error)
+        router.push('/simple-auth/admin/login')
+      }
+    }
+
+    loadAdminData()
+  }, [router])
 
   // Generate a simple QR code for attendance
   const generateSimpleQR = async () => {
@@ -198,6 +230,13 @@ export default function SimpleAdminDashboard() {
     toast.success("Session ended")
   }
 
+  // Handle admin logout
+  const handleLogout = () => {
+    localStorage.removeItem('current_simple_admin')
+    router.push('/simple-auth/admin/login')
+    toast.success("Logged out successfully")
+  }
+
   // Format time remaining
   const getTimeRemaining = () => {
     if (!currentSession) return "00:00"
@@ -213,6 +252,11 @@ export default function SimpleAdminDashboard() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
+  // If no admin data, don't render the dashboard
+  if (!admin) {
+    return null
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
       <div className="max-w-4xl mx-auto">
@@ -222,13 +266,38 @@ export default function SimpleAdminDashboard() {
             <h1 className="text-2xl font-bold text-foreground">Simple Attendance System</h1>
             <p className="text-muted-foreground">Generate QR codes for student attendance</p>
           </div>
-          <Button 
-            variant="outline" 
-            onClick={() => router.back()}
-          >
-            Back
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              onClick={handleLogout}
+              size="sm"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
+
+        {/* Admin Info */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <User className="w-5 h-5" />
+              Welcome, {admin.name}
+            </CardTitle>
+            <CardDescription>
+              Administrator Dashboard
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4">
+              <Badge variant="secondary">{admin.email}</Badge>
+              <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/20">
+                {admin.role}
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Session Status */}
         {currentSession && (

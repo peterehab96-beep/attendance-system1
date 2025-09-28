@@ -89,9 +89,16 @@ export default function HomePage() {
                 <Button 
                   variant="outline" 
                   size="sm" 
+                  onClick={() => router.push('/simple-auth')}
+                >
+                  Use Simple Auth System
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
                   onClick={() => router.push('/simple-mode')}
                 >
-                  Use Simple System
+                  Use Simple System (No Auth)
                 </Button>
               </div>
             </CardContent>

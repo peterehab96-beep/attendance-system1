@@ -12,7 +12,9 @@ import {
   QrCode, 
   Users, 
   Shield,
-  ArrowLeft
+  ArrowLeft,
+  LogIn,
+  UserPlus
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 
@@ -81,8 +83,8 @@ export default function SimpleModePage() {
           </CardContent>
         </Card>
 
-        {/* Role Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Authentication Options */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* Admin Card */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
@@ -91,7 +93,7 @@ export default function SimpleModePage() {
               </div>
               <CardTitle className="flex items-center gap-2">
                 <Shield className="w-5 h-5" />
-                Instructor Dashboard
+                Administrator
               </CardTitle>
               <CardDescription>
                 Generate QR codes and monitor attendance
@@ -116,13 +118,23 @@ export default function SimpleModePage() {
                   Works on any device or browser
                 </li>
               </ul>
-              <Button 
-                onClick={() => router.push('/admin/simple-dashboard')}
-                className="w-full"
-              >
-                <Shield className="w-4 h-4 mr-2" />
-                Access Instructor Dashboard
-              </Button>
+              <div className="flex flex-col gap-2 pt-2">
+                <Button 
+                  onClick={() => router.push('/simple-auth/admin/login')}
+                  className="w-full"
+                >
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Admin Login
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => router.push('/simple-auth/admin/register')}
+                  className="w-full"
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Admin Register
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -134,7 +146,7 @@ export default function SimpleModePage() {
               </div>
               <CardTitle className="flex items-center gap-2">
                 <Users className="w-5 h-5" />
-                Student Scanner
+                Student
               </CardTitle>
               <CardDescription>
                 Scan QR codes to mark attendance
@@ -159,20 +171,29 @@ export default function SimpleModePage() {
                   Instant attendance confirmation
                 </li>
               </ul>
-              <Button 
-                onClick={() => router.push('/student/simple-scan')}
-                variant="outline"
-                className="w-full"
-              >
-                <QrCode className="w-4 h-4 mr-2" />
-                Access Student Scanner
-              </Button>
+              <div className="flex flex-col gap-2 pt-2">
+                <Button 
+                  onClick={() => router.push('/simple-auth/student/login')}
+                  className="w-full"
+                >
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Student Login
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => router.push('/simple-auth/student/register')}
+                  className="w-full"
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Student Register
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
 
         {/* Technical Info */}
-        <Card className="mt-8">
+        <Card>
           <CardHeader>
             <CardTitle>Technical Details</CardTitle>
             <CardDescription>
